@@ -1,8 +1,9 @@
 # Dependencies
 node_modules/
 
-# API cache
-api-cache/
+# API cache (keep directory, ignore contents)
+api-cache/*
+!api-cache/.gitkeep
 
 # Environment variables
 .env
