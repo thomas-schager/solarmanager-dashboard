@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SolarManager — Energy Flow</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='7' fill='%23f59e0b'/><g stroke='%23f59e0b' stroke-width='2.5' stroke-linecap='round'><line x1='16' y1='2' x2='16' y2='6'/><line x1='16' y1='26' x2='16' y2='30'/><line x1='2' y1='16' x2='6' y2='16'/><line x1='26' y1='16' x2='30' y2='16'/><line x1='5.5' y1='5.5' x2='8.5' y2='8.5'/><line x1='23.5' y1='23.5' x2='26.5' y2='26.5'/><line x1='26.5' y1='5.5' x2='23.5' y2='8.5'/><line x1='8.5' y1='23.5' x2='5.5' y2='26.5'/></g></svg>" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --solar: #f59e0b;
+      --grid-import: #ef4444;
+      --grid-export: #10b981;
+      --battery: #6366f1;
+      --home: #3b82f6;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header svg { flex-shrink: 0; }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    header .subtitle { font-size: 0.8rem; color: var(--muted); margin-top: 0.1rem; }
+
+    main {
+      width: 100%;
+      max-width: 1400px;
+      padding: 2rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    /* ── LOGIN CARD ── */
+    #login-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2rem;
+    }
+
+    #login-card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1.25rem; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .form-group label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .form-group input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.6rem 0.8rem;
+      color: var(--text);
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus { outline: none; border-color: var(--solar); }
+
+    .form-actions { display: flex; align-items: center; gap: 1rem; margin-top: 1.25rem; }
+
+    button {
+      background: var(--solar);
+      color: #000;
+      font-weight: 600;
+      font-size: 0.875rem;
+      border: none;
+      border-radius: 0.5rem;
+      padding: 0.6rem 1.5rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #error-msg {
+      font-size: 0.8rem;
+      color: #f87171;
+      display: none;
+    }
+
+    /* ── DASHBOARD ── */
+    #dashboard { display: none; flex-direction: column; gap: 1.5rem; }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .status-bar .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-right: 0.4rem;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── FLOW DIAGRAM ── */
+    .flow-diagram {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2rem;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: 1fr 70px 1fr 70px 1fr;
+      grid-template-rows: auto 60px auto;
+      gap: 0;
+      align-items: center;
+      justify-items: center;
+    }
+
+    .flow-node {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 1rem;
+      padding: 1rem 1.25rem;
+      text-align: center;
+      min-width: 130px;
+      transition: border-color 0.3s;
+    }
+
+    .flow-node.solar  { border-color: var(--solar); }
+    .flow-node.grid   { border-color: var(--grid-import); }
+    .flow-node.grid.exporting { border-color: var(--grid-export); }
+    .flow-node.battery { border-color: var(--battery); }
+    .flow-node.home   { border-color: var(--home); }
+
+    .flow-node .icon { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    .flow-node .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .flow-node .value { font-size: 1.4rem; font-weight: 700; margin-top: 0.2rem; }
+    .flow-node .sub   { font-size: 0.75rem; color: var(--muted); margin-top: 0.1rem; }
+
+    .flow-node.solar  .value { color: var(--solar); }
+    .flow-node.grid   .value { color: var(--grid-import); }
+    .flow-node.grid.exporting .value { color: var(--grid-export); }
+    .flow-node.battery .value { color: var(--battery); }
+    .flow-node.home   .value { color: var(--home); }
+
+    /* connectors — SVG arrows */
+    .connector {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .connector svg { overflow: visible; }
+
+    /* animated dash for active flows */
+    .flow-arrow {
+      stroke-dasharray: 8 6;
+      animation: dash 1.2s linear infinite;
+    }
+    @keyframes dash {
+      to { stroke-dashoffset: -14; }
+    }
+    .flow-arrow.reverse {
+      animation-direction: reverse;
+    }
+    .flow-arrow.inactive {
+      stroke-dasharray: none;
+      animation: none;
+    }
+
+    /* logout */
+    #logout-btn {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      font-size: 0.75rem;
+      padding: 0.35rem 0.9rem;
+    }
+    #logout-btn:hover { color: var(--text); border-color: var(--text); opacity: 1; }
+
+    /* ── HISTORY ── */
+    #history-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .history-header h2 { font-size: 1rem; font-weight: 600; }
+
+    .tab-bar {
+      display: flex;
+      background: var(--bg);
+      border-radius: 0.5rem;
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .tab-bar button {
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+      padding: 0.3rem 0.9rem;
+      border-radius: 0.35rem;
+    }
+
+    .tab-bar button.active {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .tab-bar button:hover:not(.active) { color: var(--text); opacity: 1; }
+
+    .history-controls {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .ctrl-group input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.4rem;
+      padding: 0.3rem 0.5rem;
+      color: var(--text);
+      font-size: 0.85rem;
+      width: 60px;
+      text-align: center;
+    }
+
+    .ctrl-group input[type="number"]:focus { outline: none; border-color: var(--solar); }
+
+#hist-loading {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 0.5rem 0;
+    }
+
+    .hist-table-wrap { overflow-x: auto; }
+
+    #hist-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    #hist-table th {
+      text-align: left;
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    #hist-table td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      line-height: 1.5;
+    }
+
+    #hist-table tbody tr:last-child td { border-bottom: none; }
+    #hist-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+
+    #hist-table tfoot td {
+      border-top: 2px solid var(--border);
+      font-weight: 600;
+      padding: 0.7rem 0.75rem;
+    }
+
+    .period-label { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+    .solar-col  { color: var(--solar); }
+    .import-col { color: var(--grid-import); }
+    .self-col   { color: var(--grid-export); }
+    .export-col { color: #a78bfa; }
+    .batt-soc-col { color: #818cf8; }
+    .grid-sim-col { color: #38bdf8; }
+    .ht-col       { color: #f87171; }
+    .nt-col       { color: #a3e635; }
+
+    .perc  { font-size: 0.75rem; color: var(--muted); }
+
+    td.err { color: #f87171; font-size: 0.8rem; }
+
+    /* ── CHART ── */
+    #chart-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .chart-toggles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.25rem;
+    }
+
+    .chart-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chart-toggle input[type="checkbox"] {
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+      accent-color: currentColor;
+      flex-shrink: 0;
+    }
+
+    .chart-toggle.active { color: var(--text); }
+
+    .chart-toggle::before {
+      content: '';
+      display: inline-block;
+      width: 18px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--c, #94a3b8);
+      flex-shrink: 0;
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 280px;
+    }
+
+    @media (max-width: 600px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .flow-node { min-width: 100px; }
+      .flow-node .value { font-size: 1.1rem; }
+      .history-header { flex-direction: column; align-items: flex-start; }
+      #hist-table th, #hist-table td { padding: 0.5rem 0.5rem; font-size: 0.78rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+    <circle cx="14" cy="14" r="14" fill="#f59e0b" opacity="0.15"/>
+    <circle cx="14" cy="14" r="6" fill="#f59e0b"/>
+    <line x1="14" y1="2" x2="14" y2="6" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="14" y1="22" x2="14" y2="26" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="2" y1="14" x2="6" y2="14" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="22" y1="14" x2="26" y2="14" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="5.5" y1="5.5" x2="8.4" y2="8.4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="19.6" y1="19.6" x2="22.5" y2="22.5" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="22.5" y1="5.5" x2="19.6" y2="8.4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="8.4" y1="19.6" x2="5.5" y2="22.5" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  <div>
+    <h1>SolarManager</h1>
+    <div class="subtitle">Energy Flow Dashboard</div>
+  </div>
+</header>
+
+<main>
+
+  <!-- LOGIN -->
+  <div id="login-card">
+    <h2>Connect to your SolarManager</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Email / Username</label>
+        <input id="inp-user" type="email" value="thomas@schager.ch" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input id="inp-pass" type="password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div class="form-group" style="grid-column: 1 / -1">
+        <label>SolarManager ID (smId)</label>
+        <input id="inp-smid" type="text" value="003700263432511635373334" />
+      </div>
+    </div>
+    <div class="form-actions">
+      <button id="connect-btn">Connect</button>
+      <span id="error-msg"></span>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard">
+
+    <div class="status-bar">
+      <span><span class="dot"></span> Live · updates every 10 s</span>
+      <button id="logout-btn">Disconnect</button>
+    </div>
+
+    <!-- FLOW DIAGRAM -->
+    <div class="flow-diagram">
+      <!--
+        Layout (3×3 grid):
+          [Solar]    [↓ arrow]  [empty]
+          [→ arrow]  [HOME]     [← arrow]
+          [Battery]  [↑ arrow]  [Grid]
+      -->
+      <!--
+        Layout (5-col × 3-row grid):
+          [empty]  [empty]   [Solar]   [empty]   [empty]
+          [empty]  [empty]   [ ↕ ]     [empty]   [empty]
+          [Batt]   [←→ arr] [Home]   [←→ arr]  [Grid]
+      -->
+      <div class="flow-grid">
+
+        <!-- Row 1: Solar centred in col 3 -->
+        <div></div>
+        <div></div>
+        <div class="flow-node solar" id="node-solar">
+          <div class="icon">☀️</div>
+          <div class="label">Solar</div>
+          <div class="value" id="val-solar">—</div>
+          <div class="sub">W</div>
+        </div>
+        <div></div>
+        <div></div>
+
+        <!-- Row 2: vertical Solar→Home connector in col 3 -->
+        <div></div>
+        <div></div>
+        <div class="connector">
+          <svg width="20" height="60" style="display:block">
+            <line x1="10" y1="0" x2="10" y2="60" stroke="#f59e0b" stroke-width="2"
+                  class="flow-arrow" id="arrow-solar-home" />
+          </svg>
+        </div>
+        <div></div>
+        <div></div>
+
+        <!-- Row 3: Battery — connector — Home — connector — Grid -->
+        <div class="flow-node battery" id="node-battery">
+          <div class="icon">🔋</div>
+          <div class="label">Battery</div>
+          <div class="value" id="val-battery">—</div>
+          <div class="sub" id="sub-battery">W</div>
+        </div>
+
+        <div class="connector">
+          <svg width="70" height="20" style="display:block">
+            <line x1="0" y1="10" x2="70" y2="10" stroke="#6366f1" stroke-width="2"
+                  class="flow-arrow" id="arrow-battery-home" />
+          </svg>
+        </div>
+
+        <div class="flow-node home" id="node-home">
+          <div class="icon">🏠</div>
+          <div class="label">Home</div>
+          <div class="value" id="val-home">—</div>
+          <div class="sub">W</div>
+        </div>
+
+        <div class="connector">
+          <svg width="70" height="20" style="display:block">
+            <line x1="0" y1="10" x2="70" y2="10" stroke="#ef4444" stroke-width="2"
+                  class="flow-arrow" id="arrow-grid-home" />
+          </svg>
+        </div>
+
+        <div class="flow-node grid" id="node-grid">
+          <div class="icon">🔌</div>
+          <div class="label" id="label-grid">Grid</div>
+          <div class="value" id="val-grid">—</div>
+          <div class="sub" id="sub-grid">W</div>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- HISTORY -->
+    <div id="history-section">
+      <div class="history-header">
+        <h2>History</h2>
+        <div class="tab-bar">
+          <button class="tab active" data-period="day">Days</button>
+          <button class="tab" data-period="week">Weeks</button>
+          <button class="tab" data-period="month">Months</button>
+        </div>
+      </div>
+
+      <div class="history-controls">
+        <div class="ctrl-group">
+          <span>Last</span>
+          <input id="hist-n" type="number" value="30" min="1" max="52" />
+          <span id="hist-n-unit">days</span>
+        </div>
+        <div class="ctrl-group">
+          <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;color:var(--text)">
+            <input type="checkbox" id="sim-toggle" checked style="width:13px;height:13px;cursor:pointer;accent-color:var(--battery)" />
+            <span>Akku-Simulation</span>
+          </label>
+        </div>
+        <div class="ctrl-group" id="batt-size-ctrl">
+          <span>Akkugrösse</span>
+          <input id="batt-size" type="number" value="60" min="0" max="120" step="5" />
+          <span>kWh</span>
+        </div>
+        <div class="ctrl-group" id="batt-min-ctrl">
+          <span>Min. Ladestand</span>
+          <input id="batt-min" type="number" value="10" min="0" max="100" step="5" />
+          <span>%</span>
+        </div>
+      </div>
+
+      <div id="hist-loading" style="display:none">Loading history…</div>
+
+      <div id="chart-section">
+        <div id="chart-kwh-section">
+          <div class="chart-toggles">
+            <label class="chart-toggle active" style="--c:#f59e0b">
+              <input type="checkbox" data-ds="pv" data-chart="kwh" checked /> PV produziert
+            </label>
+            <label class="chart-toggle active" style="--c:#38bdf8">
+              <input type="checkbox" data-ds="simImport" data-chart="kwh" checked /> Netzbezug (simuliert)
+            </label>
+            <label class="chart-toggle active" style="--c:#ef4444">
+              <input type="checkbox" data-ds="realImport" data-chart="kwh" checked /> Netzbezug (effektiv)
+            </label>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="hist-chart-kwh"></canvas>
+          </div>
+        </div>
+        <div id="chart-pct-section">
+          <div class="chart-toggles">
+            <label class="chart-toggle active" style="--c:#10b981">
+              <input type="checkbox" data-ds="selfRate" data-chart="pct" checked /> Eigenverbrauch %
+            </label>
+            <label class="chart-toggle active" style="--c:#818cf8">
+              <input type="checkbox" data-ds="soc" data-chart="pct" checked /> Akkustand %
+            </label>
+            <label class="chart-toggle active" style="--c:#f59e0b">
+              <input type="checkbox" data-ds="charge" data-chart="pct" checked /> Ladung (kWh)
+            </label>
+            <label class="chart-toggle active" style="--c:#ef4444">
+              <input type="checkbox" data-ds="discharge" data-chart="pct" checked /> Entladung (kWh)
+            </label>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="hist-chart-pct"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="hist-table-wrap">
+        <table id="hist-table">
+          <thead>
+            <tr id="hist-thead-row">
+              <th>Period</th>
+              <th class="solar-col">PV Produced</th>
+              <th class="import-col">Grid Import</th>
+              <th class="self-col">Self-Used</th>
+              <th class="export-col">Grid Export</th>
+            </tr>
+          </thead>
+          <tbody id="hist-body"></tbody>
+          <tfoot id="hist-foot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ── State ──────────────────────────────────────────────
+  let credentials = null;
+  let pollTimer = null;
+
+  // ── UI helpers ─────────────────────────────────────────
+  function fmt(w) {
+    if (w == null) return '—';
+    const abs = Math.abs(w);
+    return abs >= 1000 ? (abs / 1000).toFixed(2) + ' kW' : Math.round(abs) + ' W';
+  }
+
+  function setArrow(id, active, reverse = false) {
+    const el = $(id);
+    if (active) {
+      el.classList.remove('inactive');
+      el.classList.toggle('reverse', reverse);
+    } else {
+      el.classList.add('inactive');
+      el.classList.remove('reverse');
+    }
+  }
+
+  // ── Render data ────────────────────────────────────────
+  function render(data) {
+    const solar   = data.currentPvGeneration ?? 0;
+    const consume = data.currentPowerConsumption ?? 0;
+    const battery = data.currentBatteryChargeDischarge ?? 0; // + = charging, - = discharging
+    // Grid is not a direct field: positive = importing, negative = exporting
+    const grid    = consume - solar + battery;
+    const soc     = data.soc ?? null;
+
+    // Nodes
+    $('val-solar').textContent   = fmt(solar);
+    $('val-home').textContent    = fmt(consume);
+    $('val-battery').textContent = fmt(Math.abs(battery));
+    $('sub-battery').textContent = battery > 50 ? 'Charging' : battery < -50 ? 'Discharging' : 'Idle';
+
+    const gridAbs = Math.abs(grid);
+    const exporting = grid < -50;
+    $('val-grid').textContent = fmt(gridAbs);
+    $('label-grid').textContent = exporting ? 'Grid (export)' : grid > 50 ? 'Grid (import)' : 'Grid';
+    $('sub-grid').textContent = exporting ? '↑ export' : grid > 50 ? '↓ import' : '—';
+    $('node-grid').classList.toggle('exporting', exporting);
+
+    // Arrows
+    // Solar → Home: always downward when active
+    setArrow('arrow-solar-home', solar > 50, false);
+
+    // Battery ↔ Home (horizontal, battery is left):
+    //   discharging (battery < -50): Battery → Home = left-to-right = normal
+    //   charging    (battery >  50): Home → Battery = right-to-left = reverse
+    setArrow('arrow-battery-home', Math.abs(battery) > 50, battery > 50);
+
+    // Grid ↔ Home (horizontal, grid is right):
+    //   importing (grid > 50):   Grid → Home = right-to-left = reverse
+    //   exporting (grid < -50):  Home → Grid = left-to-right = normal
+    setArrow('arrow-grid-home', Math.abs(grid) > 50, !exporting);
+  }
+
+  // ── Poll ───────────────────────────────────────────────
+  async function poll() {
+    try {
+      const res = await fetch(`/api/stream?smId=${encodeURIComponent(credentials.smId)}`, {
+        headers: { Authorization: credentials.auth }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'API error');
+      render(data);
+    } catch (err) {
+      console.error('Poll error:', err);
+    }
+  }
+
+  function startPolling() {
+    poll();
+    pollTimer = setInterval(poll, 10_000);
+  }
+
+  function stopPolling() {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  // ── Connect ────────────────────────────────────────────
+  $('connect-btn').addEventListener('click', async () => {
+    const user = $('inp-user').value.trim();
+    const pass = $('inp-pass').value;
+    const smId = $('inp-smid').value.trim();
+
+    const errEl = $('error-msg');
+    errEl.style.display = 'none';
+
+    if (!user || !pass || !smId) {
+      errEl.textContent = 'All fields are required.';
+      errEl.style.display = 'inline';
+      return;
+    }
+
+    $('connect-btn').disabled = true;
+    $('connect-btn').textContent = 'Connecting…';
+
+    const auth = 'Basic ' + btoa(user + ':' + pass);
+
+    try {
+      const res = await fetch(`/api/stream?smId=${encodeURIComponent(smId)}`, {
+        headers: { Authorization: auth }
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      credentials = { auth, smId };
+      render(data);
+
+      $('login-card').style.display = 'none';
+      $('dashboard').style.display = 'flex';
+      startPolling();
+      loadHistory();
+    } catch (err) {
+      errEl.textContent = 'Connection failed: ' + err.message;
+      errEl.style.display = 'inline';
+    } finally {
+      $('connect-btn').disabled = false;
+      $('connect-btn').textContent = 'Connect';
+    }
+  });
+
+  // ── Enter key shortcut ─────────────────────────────────
+  ['inp-user', 'inp-pass', 'inp-smid'].forEach(id => {
+    $(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') $('connect-btn').click();
+    });
+  });
+
+  // ── Disconnect ─────────────────────────────────────────
+  $('logout-btn').addEventListener('click', () => {
+    stopPolling();
+    credentials = null;
+    tariffConfig = null;
+    ['kwh','pct'].forEach(id => { if (charts[id]) { charts[id].destroy(); charts[id] = null; } });
+    lastChartData = null;
+    $('dashboard').style.display = 'none';
+    $('login-card').style.display = 'block';
+  });
+
+  // ── Tariff ─────────────────────────────────────────────
+  let tariffConfig = null; // cached after first fetch
+
+  async function loadTariff() {
+    if (tariffConfig) return tariffConfig;
+    try {
+      const res = await fetch(`/api/tariff?smId=${encodeURIComponent(credentials.smId)}`, {
+        headers: { Authorization: credentials.auth },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      tariffConfig = await res.json();
+    } catch (err) {
+      console.error('Tariff fetch error:', err);
+      tariffConfig = null;
+    }
+    return tariffConfig;
+  }
+
+  // Returns { htHours, ntHours } for a given date based on tariff schedule.
+  // Uses commonSeasons schedule only (ignores winterSeason for simplicity).
+  function computeTariffHours(date, tc) {
+    if (!tc) return { htHours: 12, ntHours: 12 }; // fallback: 50/50
+
+    const dow = date.getDay(); // 0=Sun,1=Mon,...,6=Sat
+    let periods;
+    if (dow === 0)      periods = tc.commonSeasons?.sunday       ?? [];
+    else if (dow === 6) periods = tc.commonSeasons?.saturday     ?? [];
+    else                periods = tc.commonSeasons?.mondayFriday ?? [];
+
+    if (!periods.length) return { htHours: 12, ntHours: 12 };
+
+    // Build 24 half-slots: 0 = 00:00–00:30, ..., 47 = 23:30–24:00
+    // Each slot is 0.5 h; sum up HT slots
+    let htSlots = 0;
+    for (let slot = 0; slot < 48; slot++) {
+      const slotMin = slot * 30;
+      // Find which period applies (last period whose `from` ≤ slotMin)
+      let tariff = periods[0]?.tariff ?? 'low';
+      for (const p of periods) {
+        const [h, m] = p.from.split(':').map(Number);
+        if (h * 60 + m <= slotMin) tariff = p.tariff;
+      }
+      if (tariff === 'high') htSlots++;
+    }
+    const htHours = htSlots * 0.5;
+    return { htHours, ntHours: 24 - htHours };
+  }
+
+  // Split gridImport into HT/NT proportionally by schedule hours
+  function splitByTariff(gridImport, date, tc) {
+    const { htHours, ntHours } = computeTariffHours(date, tc);
+    const total = htHours + ntHours; // always 24
+    return {
+      htImport: gridImport * (htHours / total),
+      ntImport: gridImport * (ntHours / total),
+    };
+  }
+
+  // ── History ────────────────────────────────────────────
+  let histPeriodType = 'day';
+
+  const PERIOD_UNITS    = { day: 'days', week: 'weeks', month: 'months' };
+  const PERIOD_DEFAULTS = { day: 30, week: 10, month: 6 };
+  const ACCURACY        = { day: 'high', week: 'medium', month: 'low' };
+
+  let simulationEnabled = true;
+  function battCap() { return Math.max(1, parseFloat($('batt-size').value) || 60); }
+  function battMin() { return battCap() * (parseFloat($('batt-min').value) || 10) / 100; }
+
+  function getPeriods(type, n) {
+    const now = new Date();
+    const periods = [];
+    for (let i = 0; i < n; i++) {
+      let from, to, label;
+      if (type === 'day') {
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i,     0,  0,  0,   0);
+        to   = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i,    23, 59, 59, 999);
+        label = i === 0 ? 'Today'
+              : i === 1 ? 'Yesterday'
+              : from.toLocaleDateString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit' });
+      } else if (type === 'week') {
+        const daysToMon = (now.getDay() + 6) % 7;
+        const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysToMon - i * 7);
+        from  = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate(),      0,  0,  0,   0);
+        to    = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6, 23, 59, 59, 999);
+        label = i === 0 ? 'This week'
+              : `${from.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })} – ${to.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })}`;
+      } else {
+        from  = new Date(now.getFullYear(), now.getMonth() - i,     1,  0,  0,  0,   0);
+        to    = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+        label = i === 0 ? 'This month'
+              : from.toLocaleDateString('de-CH', { month: 'long', year: 'numeric' });
+      }
+      periods.push({ from, to, label });
+    }
+    return periods;
+  }
+
+  async function fetchStats(from, to, accuracy) {
+    const params = new URLSearchParams({
+      smId: credentials.smId,
+      from: from.toISOString(),
+      to:   to.toISOString(),
+      accuracy,
+    });
+    const res = await fetch(`/api/statistics?${params}`, {
+      headers: { Authorization: credentials.auth },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // Battery simulation: oldest→newest, carries SOC forward.
+  // Input rows are newest-first; returns newest-first with sim fields added.
+  function runBatterySimulation(rows) {
+    let soc = 0; // kWh, starts empty
+    const simulated = [...rows].reverse().map(r => {
+      const socBefore = soc;
+      // Charge from solar surplus
+      const charge    = Math.min(r.gridExport, battCap() - soc);
+      soc += charge;
+      // Discharge to cover grid demand (never below minimum SOC)
+      const discharge = Math.min(r.gridImport, Math.max(0, soc - battMin()));
+      soc -= discharge;
+      const socAfter  = soc;
+      const simGridImport = r.gridImport - discharge;
+      return { ...r, charge, discharge, socBefore, socAfter, simGridImport };
+    });
+    return simulated.reverse();
+  }
+
+  function pct(kwh) { return (kwh / battCap() * 100).toFixed(0) + '%'; }
+
+  async function loadHistory() {
+    const isDay    = histPeriodType === 'day';
+    const simOn    = isDay && simulationEnabled;
+    const n        = Math.max(parseInt($('hist-n').value) || 7, 1);
+    const accuracy = ACCURACY[histPeriodType];
+    const periods  = getPeriods(histPeriodType, n);
+
+    $('hist-loading').style.display = 'block';
+    $('hist-body').style.opacity = '0.4';
+
+    const [results, tc] = await Promise.all([
+      Promise.allSettled(periods.map(p => fetchStats(p.from, p.to, accuracy))),
+      loadTariff(),
+    ]);
+
+    $('hist-loading').style.display = 'none';
+    $('hist-body').style.opacity = '1';
+
+    // Headers
+    const htRateRp = tc?.highTariff ?? null; // API value in Rappen/kWh
+    const ntRateRp = tc?.lowTariff  ?? null;
+    const htRate   = htRateRp != null ? htRateRp / 100 : null; // CHF/kWh
+    const ntRate   = ntRateRp != null ? ntRateRp / 100 : null;
+    const cur      = 'CHF';
+    const fmtCost  = v => v != null ? `${v.toFixed(2)} ${cur}` : '—';
+    const htLabel  = htRateRp != null ? `HT (${htRateRp.toFixed(2)} Rp./kWh)` : 'HT';
+    const ntLabel  = ntRateRp != null ? `NT (${ntRateRp.toFixed(2)} Rp./kWh)` : 'NT';
+
+    $('hist-thead-row').innerHTML = simOn
+      ? `<th>Zeitraum</th>
+         <th class="solar-col">PV produziert</th>
+         <th class="self-col">Eigenverbrauch</th>
+         <th class="batt-soc-col">🔋 Akku-Simulation</th>
+         <th class="grid-sim-col">Netzbezug simuliert</th>
+         <th class="import-col">Netzbezug effektiv</th>`
+      : `<th>Zeitraum</th>
+         <th class="solar-col">PV produziert</th>
+         <th class="self-col">Eigenverbrauch</th>
+         <th class="import-col">Netzbezug effektiv</th>
+         <th class="export-col">Netzeinspeisung</th>`;
+
+    // Parse raw rows (newest first)
+    const rawRows = periods.map((period, i) => {
+      const result = results[i];
+      if (result.status === 'rejected') return { period, error: result.reason?.message ?? result.reason };
+      const d          = result.value;
+      const prod       = (d.production      ?? 0) / 1000;
+      const selfUse    = (d.selfConsumption ?? 0) / 1000;
+      const selfRate   =  d.selfConsumptionRate   ?? 0;
+      const consume    = (d.consumption     ?? 0) / 1000;
+      const gridImport = Math.max(0, consume - selfUse);
+      const gridExport = Math.max(0, prod   - selfUse);
+      const { htImport, ntImport } = splitByTariff(gridImport, period.from, tc);
+      return { period, prod, selfUse, selfRate, gridImport, gridExport, htImport, ntImport };
+    });
+
+    // Battery simulation (day mode + simulation enabled)
+    let simMap = null;
+    if (simOn) {
+      const validRows  = rawRows.filter(r => !r.error);
+      const simResults = runBatterySimulation(validRows);
+      simMap = new Map(simResults.map(r => [r.period, r]));
+    }
+
+    const tbody = $('hist-body');
+    tbody.innerHTML = '';
+
+    let totProd = 0, totSelfUse = 0, totImport = 0, totExport = 0;
+    let totCharge = 0, totDischarge = 0, totSimImport = 0;
+    let totHt = 0, totNt = 0, totSimHt = 0, totSimNt = 0;
+
+    // Chart data (oldest → newest for left-to-right display)
+    const chartLabels = [];
+    const chartData   = { pv: [], selfRate: [], soc: [], simImport: [], realImport: [], simSavings: [], charge: [], discharge: [] };
+
+    rawRows.forEach(row => {
+      const tr = document.createElement('tr');
+      if (row.error) {
+        tr.innerHTML = `<td class="period-label">${row.period.label}</td><td colspan="5" class="err">Failed to load: ${row.error}</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const { period, prod, selfUse, selfRate, gridImport, gridExport, htImport, ntImport } = row;
+      totProd    += prod;
+      totSelfUse += selfUse;
+      totImport  += gridImport;
+      totExport  += gridExport;
+      totHt      += htImport;
+      totNt      += ntImport;
+
+      // Chart: collect oldest→newest (rawRows is newest-first, so prepend)
+      chartLabels.unshift(period.label);
+      chartData.pv.unshift(prod);
+      chartData.selfRate.unshift(selfRate);
+      chartData.realImport.unshift(gridImport);
+
+      // Helper: render a tariff breakdown line
+      const tariffLines = (ht, nt) => {
+        const htCost = htRate != null ? ht * htRate : null;
+        const ntCost = ntRate != null ? nt * ntRate : null;
+        const totalCost = (htCost ?? 0) + (ntCost ?? 0);
+        return `<span class="ht-col">HT&nbsp;${ht.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost(htCost)}&nbsp;<span class="perc">(${htRateRp != null ? htRateRp.toFixed(2) : '—'}&nbsp;Rp.)</span></span><br>`
+             + `<span class="nt-col">NT&nbsp;${nt.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost(ntCost)}&nbsp;<span class="perc">(${ntRateRp != null ? ntRateRp.toFixed(2) : '—'}&nbsp;Rp.)</span></span><br>`
+             + `<span class="perc">Total&nbsp;${fmtCost((htRate != null || ntRate != null) ? totalCost : null)}</span>`;
+      };
+
+      if (simOn) {
+        const s = simMap.get(period);
+        totCharge    += s.charge;
+        totDischarge += s.discharge;
+        totSimImport += s.simGridImport;
+        const { htImport: simHt, ntImport: simNt } = splitByTariff(s.simGridImport, period.from, tc);
+        // Value battery savings at the same HT/NT split as the effective import
+        const { htImport: savHt, ntImport: savNt } = splitByTariff(s.discharge, period.from, tc);
+        const savCost = (htRate != null ? savHt * htRate : 0) + (ntRate != null ? savNt * ntRate : 0);
+        totSimHt += simHt;
+        totSimNt += simNt;
+        chartData.soc.unshift(parseFloat((s.socAfter / battCap() * 100).toFixed(1)));
+        chartData.simImport.unshift(s.simGridImport);
+        chartData.simSavings.unshift((htRate != null || ntRate != null) ? parseFloat(savCost.toFixed(4)) : null);
+        chartData.charge.unshift(parseFloat(s.charge.toFixed(3)));
+        chartData.discharge.unshift(-parseFloat(s.discharge.toFixed(3)));
+        tr.innerHTML = `
+          <td class="period-label">${period.label}</td>
+          <td class="solar-col">${prod.toFixed(2)} kWh</td>
+          <td class="self-col">${selfUse.toFixed(2)} kWh<br><span class="perc">${selfRate.toFixed(1)}% of PV</span></td>
+          <td class="batt-soc-col">
+            ↑ ${s.charge.toFixed(2)} kWh &nbsp;↓ ${s.discharge.toFixed(2)} kWh<br>
+            <span class="perc">${pct(s.socBefore)} → ${pct(s.socAfter)}</span>
+          </td>
+          <td class="grid-sim-col">
+            ${tariffLines(simHt, simNt)}
+            <span class="self-col">Ersparnis&nbsp;${s.discharge.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost((htRate != null || ntRate != null) ? savCost : null)}</span>
+          </td>
+          <td class="import-col">
+            ${tariffLines(htImport, ntImport)}
+          </td>`;
+      } else {
+        chartData.soc.unshift(null);
+        chartData.simImport.unshift(null);
+        chartData.simSavings.unshift(null);
+        chartData.charge.unshift(null);
+        chartData.discharge.unshift(null);
+        tr.innerHTML = `
+          <td class="period-label">${period.label}</td>
+          <td class="solar-col">${prod.toFixed(2)} kWh</td>
+          <td class="self-col">${selfUse.toFixed(2)} kWh<br><span class="perc">${selfRate.toFixed(1)}% of PV</span></td>
+          <td class="import-col">
+            ${tariffLines(htImport, ntImport)}
+          </td>
+          <td class="export-col">${gridExport.toFixed(2)} kWh</td>`;
+      }
+      tbody.appendChild(tr);
+    });
+
+    const totSelfRate = totProd > 0 ? (totSelfUse / totProd * 100).toFixed(1) : '0.0';
+    let foot = `<tr><td class="period-label">Total</td>
+      <td class="solar-col">${totProd.toFixed(2)} kWh</td>
+      <td class="self-col">${totSelfUse.toFixed(2)} kWh<br><span class="perc">${totSelfRate}% of PV</span></td>`;
+    // Reusable footer tariff lines (same logic as row helper but outside forEach scope)
+    const footTariffLines = (ht, nt) => {
+      const htCost = htRate != null ? ht * htRate : null;
+      const ntCost = ntRate != null ? nt * ntRate : null;
+      return `<span class="ht-col">HT&nbsp;${ht.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost(htCost)}</span><br>`
+           + `<span class="nt-col">NT&nbsp;${nt.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost(ntCost)}</span><br>`
+           + `<span class="perc">Total&nbsp;${fmtCost((htRate != null || ntRate != null) ? (htCost ?? 0) + (ntCost ?? 0) : null)}</span>`;
+    };
+
+    if (simOn) {
+      const totSavHt = totHt - totSimHt;
+      const totSavNt = totNt - totSimNt;
+      const totSavCost = (htRate != null ? totSavHt * htRate : 0) + (ntRate != null ? totSavNt * ntRate : 0);
+      foot += `
+      <td class="batt-soc-col">↑ ${totCharge.toFixed(2)} kWh &nbsp;↓ ${totDischarge.toFixed(2)} kWh</td>
+      <td class="grid-sim-col">
+        ${footTariffLines(totSimHt, totSimNt)}
+        <span class="self-col">Ersparnis&nbsp;${totDischarge.toFixed(2)}&nbsp;kWh&nbsp;·&nbsp;${fmtCost((htRate != null || ntRate != null) ? totSavCost : null)}</span>
+      </td>
+      <td class="import-col">
+        ${footTariffLines(totHt, totNt)}
+      </td>`;
+    } else {
+      foot += `
+      <td class="import-col">
+        ${footTariffLines(totHt, totNt)}
+      </td>
+      <td class="export-col">${totExport.toFixed(2)} kWh</td>`;
+    }
+    foot += `</tr>`;
+    $('hist-foot').innerHTML = foot;
+
+    // Show/hide simulation toggles based on mode
+    ['soc','simImport','charge','discharge'].forEach(key => {
+      const cb = document.querySelector(`.chart-toggles [data-ds="${key}"]`);
+      cb.closest('label').style.display = simOn ? '' : 'none';
+    });
+
+    lastChartData = { labels: chartLabels, dataMap: chartData };
+    updateChart(chartLabels, chartData);
+  }
+
+  // ── Charts ─────────────────────────────────────────────
+  let lastChartData = null;
+
+  const DS_CONFIG = {
+    pv:         { label: 'PV produziert (kWh)',      color: '#f59e0b', chart: 'kwh' },
+    simImport:  { label: 'Netzbezug simuliert (kWh)', color: '#38bdf8', chart: 'kwh' },
+    realImport: { label: 'Netzbezug effektiv (kWh)',  color: '#ef4444', chart: 'kwh' },
+    selfRate:   { label: 'Eigenverbrauch (%)',         color: '#10b981', chart: 'pct', order: 1 },
+    soc:        { label: 'Akkustand Ende Tag (%)',     color: '#818cf8', chart: 'pct', order: 1 },
+    charge:     { label: 'Ladung (kWh)',               color: '#f59e0b', chart: 'pct', type: 'bar', yAxis: 'yKwh', order: 2 },
+    discharge:  { label: 'Entladung (kWh)',            color: '#ef4444', chart: 'pct', type: 'bar', yAxis: 'yKwh', order: 2 },
+  };
+
+  const charts = { kwh: null, pct: null };
+
+  function makeDatasets(chartId, labels, dataMap) {
+    const keys = [...document.querySelectorAll(`.chart-toggles [data-chart="${chartId}"]`)]
+      .filter(cb => cb.checked).map(cb => cb.dataset.ds);
+    return keys.map(key => {
+      const cfg   = DS_CONFIG[key];
+      const isBar = cfg.type === 'bar';
+      return {
+        type:            cfg.type ?? 'line',
+        label:           cfg.label,
+        data:            dataMap[key],
+        borderColor:     cfg.color,
+        backgroundColor: cfg.color + (isBar ? '99' : '22'),
+        yAxisID:         cfg.yAxis ?? 'y',
+        order:           cfg.order ?? 0,
+        tension:         isBar ? 0 : 0.3,
+        pointRadius:     isBar ? 0 : (labels.length > 60 ? 0 : 3),
+        borderWidth:     isBar ? 0 : 2,
+        fill:            false,
+      };
+    });
+  }
+
+  function buildChart(chartId, labels, dataMap, scaleY) {
+    const canvas = $(`hist-chart-${chartId}`);
+    const datasets = makeDatasets(chartId, labels, dataMap);
+    if (charts[chartId]) {
+      charts[chartId].data.labels   = labels;
+      charts[chartId].data.datasets = datasets;
+      charts[chartId]._dataMap      = dataMap;
+      charts[chartId].update();
+      return;
+    }
+    const inst = charts[chartId] = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => {
+            const unit = c.dataset.yAxisID === 'yKwh' ? ' kWh' : scaleY.unit;
+            const val  = c.dataset.yAxisID === 'yKwh' ? Math.abs(c.parsed.y).toFixed(2) : c.parsed.y.toFixed(2);
+            const base = ` ${c.dataset.label.split(' (')[0]}: ${val}${unit}`;
+            if (chartId === 'kwh' && c.dataset.label === DS_CONFIG.simImport.label) {
+              const sav = (inst._dataMap ?? dataMap).simSavings[c.dataIndex];
+              if (sav != null) return base + `  (Ersparnis ${sav.toFixed(2)} CHF)`;
+            }
+            return base;
+          }}},
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxTicksLimit: 12, maxRotation: 0 }, grid: { color: '#1e293b' } },
+          y: { position: 'left', min: 0, ...scaleY.options,
+               ticks: { color: '#94a3b8', ...(scaleY.tickCb ? { callback: scaleY.tickCb } : {}) },
+               grid: { color: '#334155' },
+               title: { display: true, text: scaleY.label, color: '#94a3b8', font: { size: 11 } } },
+          ...(chartId === 'pct' ? { yKwh: {
+            position: 'right',
+            ticks: { color: '#94a3b8' },
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: 'kWh', color: '#94a3b8', font: { size: 11 } },
+          }} : {}),
+        },
+      },
+    });
+    inst._dataMap = dataMap;
+  }
+
+  const SCALE_KWH = { label: 'kWh', unit: ' kWh', options: {} };
+  const SCALE_PCT = { label: '%',   unit: '%',    options: { max: 100 }, tickCb: v => v + '%' };
+
+  function updateChart(labels, dataMap) {
+    buildChart('kwh', labels, dataMap, SCALE_KWH);
+    buildChart('pct', labels, dataMap, SCALE_PCT);
+  }
+
+  // Wire checkboxes
+  document.querySelectorAll('.chart-toggles input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('label').classList.toggle('active', cb.checked);
+      const chartId = cb.dataset.chart;
+      const chart   = charts[chartId];
+      if (!chart) return;
+      const cfg = DS_CONFIG[cb.dataset.ds];
+      const idx = chart.data.datasets.findIndex(d => d.label === cfg.label);
+      if (cb.checked && idx === -1) {
+        chart.destroy();
+        charts[chartId] = null;
+        if (lastChartData) buildChart(chartId, lastChartData.labels, lastChartData.dataMap,
+          chartId === 'kwh' ? SCALE_KWH : SCALE_PCT);
+      } else if (!cb.checked && idx !== -1) {
+        chart.data.datasets.splice(idx, 1);
+        chart.update();
+      }
+    });
+  });
+  // Tab switching
+  document.querySelectorAll('.tab-bar .tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-bar .tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      histPeriodType = btn.dataset.period;
+      $('hist-n').value = PERIOD_DEFAULTS[histPeriodType];
+      $('hist-n-unit').textContent = PERIOD_UNITS[histPeriodType];
+      loadHistory();
+    });
+  });
+
+  $('hist-n').addEventListener('change', loadHistory);
+  $('hist-n').addEventListener('keydown', e => { if (e.key === 'Enter') loadHistory(); });
+
+  $('sim-toggle').addEventListener('change', () => {
+    simulationEnabled = $('sim-toggle').checked;
+    $('batt-size-ctrl').style.display = simulationEnabled ? '' : 'none';
+    $('batt-min-ctrl').style.display  = simulationEnabled ? '' : 'none';
+    loadHistory();
+  });
+  $('batt-size').addEventListener('change', loadHistory);
+  $('batt-size').addEventListener('keydown', e => { if (e.key === 'Enter') loadHistory(); });
+  $('batt-min').addEventListener('change', loadHistory);
+  $('batt-min').addEventListener('keydown', e => { if (e.key === 'Enter') loadHistory(); });
+</script>
+
+</body>
+</html>
